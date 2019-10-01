@@ -19,35 +19,37 @@ final class UserListPresenter: Presenter {
     case view(user: User)
   }
 
-  private(set) var sections: Observable<PresenterState>
-  var actions: Observable<Action> {
-    actionsSubject.asObservable()
-  }
-
-  private let actionsSubject: PublishSubject<Action>
   private let repository: UserListRepository
+  private let disposeBag = DisposeBag()
+  private let sectionsSubject = BehaviorSubject<PresenterState>(value: .loading)
+  private let actionsSubject = PublishSubject<Action>()
+
+  var sections: Observable<PresenterState> { sectionsSubject.asObservable() }
+  var actions: Observable<Action> { actionsSubject.asObservable() }
 
   // MARK: - Lifecycle
 
   init(repository: UserListRepository) {
     self.repository = repository
-    self.actionsSubject = PublishSubject()
-    self.sections = Observable.just(.loading)
-    self.sections = self.sections.concat(repository.users.map { [weak self] usersResult -> PresenterState in
-      guard let strongSelf = self else {
-        return .failure(error: SystemError.cancelled)
-      }
-      switch usersResult {
-      case .success(let users):
-        let sections = [strongSelf.createSection(with: users.sorted { $0.email < $1.email })]
-        return .loaded(sections: sections)
-      case .failure(let error):
-        return .failure(error: error)
-      }
-    })
+
+    repository
+      .users
+      .map(presenterState(from:))
+      .subscribe(sectionsSubject)
+      .disposed(by: disposeBag)
   }
 
   // MARK: - Private
+
+  private func presenterState(from usersResult: Result<[User], Error>) -> PresenterState {
+    switch usersResult {
+    case .success(let users):
+      let sections = [createSection(with: users.sorted { $0.email < $1.email })]
+      return .loaded(sections: sections)
+    case .failure(let error):
+      return .failure(error: error)
+    }
+  }
 
   private func createSection(with users: [User]) -> ListSection {
     var cellModels = [ListCellModel]()
